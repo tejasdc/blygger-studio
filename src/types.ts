@@ -60,6 +60,8 @@ export interface ItemRow {
   version: number;
   content_md: string;
   dirty: number;
+  /** Private optimistic revision for draft edits and idempotent appends. */
+  draft_revision: number;
   /**
    * Working-copy-side cache of per-scope TK generation provenance (migration
    * 0005) — JSON array of `ScopeProvenance | null`, positionally aligned to

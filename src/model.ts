@@ -255,7 +255,7 @@ export async function authoredKind(db: D1Database, item: ItemRow): Promise<"frag
  */
 export async function setDraftKind(db: D1Database, id: string, kind: "fragment" | "thread"): Promise<void> {
   await db
-    .prepare("UPDATE items SET kind = ?, dirty = 1, updated = ? WHERE id = ? AND version = 0")
+    .prepare("UPDATE items SET kind = ?, dirty = 1, draft_revision = draft_revision + 1, updated = ? WHERE id = ? AND version = 0")
     .bind(kind, nowIso(), id)
     .run();
 }
@@ -280,7 +280,7 @@ export function itemShowsResponses(item: ItemRow, settings: Settings): boolean {
 /** Save the working copy. Does not touch `updated` for ever-published items — that field is publish-facing. */
 export async function saveWorkingCopy(db: D1Database, id: string, contentMd: string): Promise<void> {
   await db
-    .prepare("UPDATE items SET content_md = ?, dirty = 1, updated = CASE WHEN version = 0 THEN ? ELSE updated END WHERE id = ?")
+    .prepare("UPDATE items SET content_md = ?, dirty = 1, draft_revision = draft_revision + 1, updated = CASE WHEN version = 0 THEN ? ELSE updated END WHERE id = ?")
     .bind(contentMd, nowIso(), id)
     .run();
 }
@@ -293,7 +293,7 @@ export async function saveWorkingCopy(db: D1Database, id: string, contentMd: str
  */
 export async function setStubOf(db: D1Database, id: string, stub: StubOf | null): Promise<void> {
   await db
-    .prepare("UPDATE items SET stub_of = ?, dirty = 1 WHERE id = ?")
+    .prepare("UPDATE items SET stub_of = ?, dirty = 1, draft_revision = draft_revision + 1 WHERE id = ?")
     .bind(stub ? JSON.stringify(stub) : null, id)
     .run();
 }
@@ -555,7 +555,7 @@ export async function restoreVersion(db: D1Database, item: ItemRow, version: num
   }
   const discard = version === item.version;
   await db
-    .prepare("UPDATE items SET content_md = ?, tk_provenance_json = NULL, stub_of = CASE WHEN ? THEN ? ELSE stub_of END, dirty = ? WHERE id = ?")
+    .prepare("UPDATE items SET content_md = ?, tk_provenance_json = NULL, stub_of = CASE WHEN ? THEN ? ELSE stub_of END, dirty = ?, draft_revision = draft_revision + 1 WHERE id = ?")
     .bind(row.content_md, discard ? 1 : 0, row.stub_of, discard && !row.generated_json ? 0 : 1, item.id)
     .run();
 }

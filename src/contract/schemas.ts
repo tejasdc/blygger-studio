@@ -9,6 +9,7 @@ export const ItemRowSchema = z.object({
   version: z.number(),
   content_md: z.string(),
   dirty: z.number(),
+  draft_revision: z.number().int().nonnegative(),
   tk_provenance_json: z.string().nullable(),
   show_responses: z.number(),
   responses_override: z.number().nullable(),

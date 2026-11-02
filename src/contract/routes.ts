@@ -14,15 +14,17 @@ const ok = z.object({ ok: z.boolean() });
 const created = ItemSchema;
 const ref = VersionReferenceSchema;
 const stub = StubSchema;
-export const ItemEditSchema = z.object({ provenance: z.array(z.union([ProvenanceSchema, z.null()])).optional(), content_md: z.string().optional(), kind: z.enum(["fragment", "thread"]).optional(), stub_of: z.union([stub, z.null()]).optional(), responses: z.enum(["default", "show", "hide"]).optional(), highlight: z.enum(["default", "show", "hide"]).optional() }).strict();
+export const ItemEditSchema = z.object({ provenance: z.array(z.union([ProvenanceSchema, z.null()])).optional(), content_md: z.string().optional(), kind: z.enum(["fragment", "thread"]).optional(), stub_of: z.union([stub, z.null()]).optional(), responses: z.enum(["default", "show", "hide"]).optional(), highlight: z.enum(["default", "show", "hide"]).optional(), expected_revision: z.number().int().nonnegative().optional() }).strict();
 export const ItemCreateSchema = z.union([
-  ItemEditSchema.omit({ responses: true, highlight: true }).extend({ mode: z.literal("blank").optional() }).strict(),
+  ItemEditSchema.omit({ responses: true, highlight: true, expected_revision: true }).extend({ mode: z.literal("blank").optional() }).strict(),
   z.object({ mode: z.literal("fork"), source: ref }).strict(),
   z.object({ mode: z.literal("response"), source: z.object({ subscription_id: z.string().min(1), remote_id: z.string().min(1) }).strict(), selection: z.string().optional() }).strict(),
 ]);
 const toggle = z.boolean();
 const settingsBody = SettingsSchema.partial().extend({ accept_mentions: toggle.optional(), update_check: toggle.optional(), show_responses_default: toggle.optional(), highlight_generated_default: toggle.optional(), auto_change_notes: toggle.optional(), change_category_in_note: toggle.optional(), update_notice_ack: toggle.optional() }).strict();
 const note = z.object({ note: z.string().optional() });
+const appendedDraft = z.object({ item: ItemSchema, appended: z.boolean() });
+const appendDraft = z.object({ operation_id: z.string().min(1).max(160).regex(/^[A-Za-z0-9:_-]+$/), expected_revision: z.number().int().nonnegative(), content_md: z.string().min(1).max(100_000) });
 const changeCategory = z.enum(CHANGE_CATEGORIES);
 const version = z.object({ version: z.number().int().positive() });
 const page = z.object({ offset: z.coerce.number().int().min(0).optional(), limit: z.coerce.number().int().min(1).max(100).optional() });
@@ -81,6 +83,7 @@ export const routes = {
   getChanges: route('getChanges', 'get', '/changes', z.object({ epoch: z.string().min(1), domains: z.object(Object.fromEntries(CHANGE_DOMAINS.map(domain => [domain, z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)])) as Record<typeof CHANGE_DOMAINS[number], z.ZodNumber>) }).openapi('ChangeState')),
   createItem: route("createItem", "post", "/items", created, ItemCreateSchema, 201, undefined, true),
   updateItem: route("updateItem", "patch", "/items/{id}", ItemSchema, ItemEditSchema),
+  appendItem: route("appendItem", "post", "/items/{id}/append", appendedDraft, appendDraft),
   publishItem: route("publishItem", "post", "/items/{id}/publish", ok.extend({ version: z.number(), warning: z.string().optional() }), note.extend({ note_generated: z.boolean().optional(), change_category: changeCategory.nullable().optional().describe("The change category the author confirmed in the publish dialog: kept with the version in studio-private storage (never on the wire). Omitted: a classification made for these words stands; null: cleared.") }), 200, undefined, true),
   classifyChange: route("classifyChange", "post", "/items/{id}/classify", z.object({ version: z.number().int().describe("The version the working copy would publish as."), category: changeCategory.nullable().describe("Null when no category could be had; see reason."), model: z.string().nullable().describe("The decision model that answered; null for refresh, decided locally from content_hash."), probability: z.number().nullable(), reason: z.string().optional().describe("Why there is no category: a provider error, an exhausted AI budget, or an unusable answer. Never fatal: publish as usual.") })),
   draftNote: route("draftNote", "post", "/items/{id}/note-draft", z.object({ note: z.string(), model: z.string(), pinned_prior: z.boolean() })),

@@ -164,14 +164,40 @@ api.openapi(routes.updateItem, async (c) => {
   if ("stub_of" in body) { assignments.push("stub_of = ?"); values.push(stubJson); }
   if (body.responses !== undefined) { assignments.push("responses_override = ?"); values.push(body.responses === "default" ? null : Number(body.responses === "show")); }
   if (body.highlight !== undefined) { assignments.push("highlight_override = ?"); values.push(body.highlight === "default" ? null : Number(body.highlight === "show")); }
-  if (changesDraft) { assignments.push("dirty = 1", "updated = CASE WHEN version = 0 THEN ? ELSE updated END"); values.push(nowIso()); }
+  if (changesDraft) { assignments.push("dirty = 1", "draft_revision = draft_revision + 1", "updated = CASE WHEN version = 0 THEN ? ELSE updated END"); values.push(nowIso()); }
   if (!assignments.length) return c.json(itemResource(item));
   // Write only requested fields. Guard the state used for validation, so a
   // concurrent publication or citation edit cannot invalidate that check.
-  const fresh = await c.env.DB.prepare(`UPDATE items SET ${assignments.join(", ")} WHERE id = ? AND version = ? AND kind = ? AND stub_of IS ? AND tk_provenance_json IS ? RETURNING *`)
-    .bind(...values, item.id, item.version, item.kind, item.stub_of, item.tk_provenance_json).first<ItemRow>();
+  const fresh = await c.env.DB.prepare(`UPDATE items SET ${assignments.join(", ")} WHERE id = ? AND version = ? AND kind = ? AND stub_of IS ? AND tk_provenance_json IS ? AND draft_revision = ? RETURNING *`)
+    .bind(...values, item.id, item.version, item.kind, item.stub_of, item.tk_provenance_json, body.expected_revision ?? item.draft_revision).first<ItemRow>();
   if (!fresh) return c.json({ error: "item changed while applying the patch; reload and try again" }, 409);
   return c.json(itemResource(fresh));
+});
+
+/**
+ * Add one retained source section without replacing edits already made in
+ * Studio. One database trigger commits the exact section, its operation
+ * receipt, and the next private draft revision together. That makes retries
+ * idempotent without putting transport markers in the author's Markdown.
+ */
+api.openapi(routes.appendItem, async (c) => {
+  const item = await getItem(c.env.DB, c.req.param("id"));
+  if (!item) return c.json({ error: "not found" }, 404);
+  const body = await readJson<{ operation_id: string; expected_revision: number; content_md: string }>(c);
+  const prior = await c.env.DB.prepare("SELECT 1 AS found FROM draft_appends WHERE item_id = ? AND operation_id = ?").bind(item.id, body.operation_id).first();
+  if (prior) return c.json({ item: itemResource(item), appended: false });
+  let appended = true;
+  try {
+    await c.env.DB.prepare("INSERT INTO draft_appends (item_id, operation_id, expected_revision, content_md, created) VALUES (?, ?, ?, ?, ?)")
+      .bind(item.id, body.operation_id, body.expected_revision, body.content_md, nowIso()).run();
+  } catch (error) {
+    const retry = await c.env.DB.prepare("SELECT 1 AS found FROM draft_appends WHERE item_id = ? AND operation_id = ?").bind(item.id, body.operation_id).first();
+    if (!retry) return c.json({ error: "draft changed; reload it before appending" }, 409);
+    appended = false;
+  }
+  const fresh = await getItem(c.env.DB, item.id);
+  if (!fresh) return c.json({ error: "not found" }, 404);
+  return c.json({ item: itemResource(fresh), appended });
 });
 
 /**
